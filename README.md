@@ -1,6 +1,6 @@
 # KDZU Captive Portal for OpenNDS
 
-A custom captive portal splash page for OpenWrt routers running OpenNDS. This project creates a zine-like manifesto page that appears when users connect to your WiFi network.
+A custom captive portal splash page for OpenWrt routers running OpenNDS. This project creates a zine-like manifesto page that appears when users connect to a KDZU Lone Wolf WiFi network.
 
 ## Table of Contents
 
@@ -18,14 +18,12 @@ A custom captive portal splash page for OpenWrt routers running OpenNDS. This pr
 
 ## Overview
 
-This project implements a custom captive portal page for the KDZU "All Is Not Lost" project. When someone connects to your WiFi network, they are automatically redirected to a custom splash page that presents the KDZU manifesto. After reading, they click a button to access the internet.
+This project implements a custom captive portal page for the KDZU "All Is Not Lost" project. When someone connects to the "All Is Not Lost" Lone Wolf WiFi network, they are automatically redirected to a custom splash page that presents the KDZU manifesto.
 
 **Key Features:**
 - No authentication required (click-through only)
-- Dark cyberpunk aesthetic with glitch effects
 - Fully responsive design
 - Self-contained theme (no external dependencies)
-- All content displayed before authentication
 
 ---
 
