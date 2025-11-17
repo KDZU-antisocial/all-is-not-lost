@@ -104,7 +104,7 @@ You should have these files:
 Use SCP to copy the theme script to your router's OpenNDS directory:
 
 ```bash
-scp -O kdzu-theme.sh root@192.168.1.1:/usr/lib/opennds/
+scp -O big-white-dog-theme.sh root@192.168.1.1:/usr/lib/opennds/
 ```
 
 **Note:** Replace `192.168.1.1` with your router's actual IP address.
@@ -122,16 +122,23 @@ ssh root@192.168.1.1
 Once connected, run these commands:
 
 ```bash
+# Make the theme script executable, commit config, and restart OpenNDS
+chmod +x /usr/lib/opennds/big-white-dog-theme.sh && uci commit opennds && /etc/init.d/opennds restart
+```
+
+**Or run the configuration steps individually:**
+
+```bash
 # Make the theme script executable
-chmod +x /usr/lib/opennds/kdzu-theme.sh
+chmod +x /usr/lib/opennds/big-white-dog-theme.sh
 
 # Configure OpenNDS to use login mode 3 (custom ThemeSpec)
 uci set opennds.@opennds[0].login_option_enabled='3'
 
 # Point to your custom theme
-uci set opennds.@opennds[0].themespec_path='/usr/lib/opennds/kdzu-theme.sh'
+uci set opennds.@opennds[0].themespec_path='/usr/lib/opennds/big-white-dog-theme.sh'
 
-# Increase max page size to accommodate your content (20KB)
+# Increase max page size to accommodate your content (see "Calculating Page Size" section below)
 uci set opennds.@opennds[0].max_page_size='20480'
 
 # Save the configuration
@@ -275,8 +282,8 @@ These are used in the authentication form:
 
 4. **Upload and restart**:
    ```bash
-   scp -O kdzu-theme.sh root@192.168.1.1:/usr/lib/opennds/
-   ssh root@192.168.1.1 "/etc/init.d/opennds restart"
+   scp -O big-white-dog-theme.sh root@192.168.1.1:/usr/lib/opennds/
+   ssh root@192.168.1.1 "chmod +x /usr/lib/opennds/big-white-dog-theme.sh && uci commit opennds && /etc/init.d/opennds restart"
    ```
 
 ### Changing Colors
@@ -314,18 +321,93 @@ To add a new section to the page:
 </section>
 ```
 
-### Adjusting Page Size
+### Calculating Page Size
 
-If you add a lot of content, you may need to increase the max page size:
+OpenNDS has a maximum page size limit to prevent buffer overflows. If your theme exceeds this limit, the page will be truncated and you'll see errors in the logs.
+
+**Method 1: Check the actual output size**
+
+SSH into your router and test the theme script output:
 
 ```bash
-# Values in bytes (20480 = 20KB, 30720 = 30KB, etc.)
+ssh root@192.168.1.1
+cd /usr/lib/opennds
+# Set some test environment variables
+export clientip="192.168.1.100"
+export gatewayurl="http://192.168.1.1:2050"
+export tok="test123"
+export originurl="http://example.com"
+export gatewayname="Test Gateway"
+
+# Run the theme and measure output
+./big-white-dog-theme.sh | wc -c
+```
+
+This will show you the exact byte count of your HTML output.
+
+**Method 2: Check locally before uploading**
+
+On your local machine, if you have a preview HTML file:
+
+```bash
+wc -c big-white-dog-theme-preview.html
+```
+
+**Method 3: Check OpenNDS logs for overflow warnings**
+
+```bash
+logread | grep -i "overflow\|truncated\|page size"
+```
+
+If you see "Buffer overflow" or "output may be truncated", your page is too large.
+
+### Adjusting Page Size with UCI
+
+Once you know your page size, set it in OpenNDS configuration:
+
+```bash
+# SSH into your router
+ssh root@192.168.1.1
+
+# Set max_page_size (values are in bytes)
+# Common sizes:
+#   20480  = 20 KB
+#   30720  = 30 KB
+#   40960  = 40 KB
+#   51200  = 50 KB
+#   61440  = 60 KB
+#   81920  = 80 KB
+#   102400 = 100 KB
+
+# Set the page size (add 10-20% buffer for safety)
 uci set opennds.@opennds[0].max_page_size='30720'
+
+# Save the configuration
 uci commit opennds
+
+# Restart OpenNDS to apply changes
 /etc/init.d/opennds restart
 ```
 
-**Warning:** Very large pages may cause performance issues on resource-constrained routers.
+**Quick one-liner:**
+
+```bash
+uci set opennds.@opennds[0].max_page_size='30720' && uci commit opennds && /etc/init.d/opennds restart
+```
+
+**Verify the new page size:**
+
+```bash
+ndsctl status | grep -i "page size"
+```
+
+**Warning:** Very large pages (over 100KB) may cause performance issues on resource-constrained routers. Consider optimizing your HTML/CSS or splitting content across multiple pages.
+
+**Tips for reducing page size:**
+- Minimize base64-encoded images (they're very large)
+- Remove unnecessary whitespace and comments
+- Use CSS efficiently (avoid repetition)
+- Consider external resources if your router has internet access
 
 ---
 
@@ -335,11 +417,20 @@ uci commit opennds
 
 **Problem:** Your page is too large for the configured max page size.
 
-**Solution:** Increase `max_page_size`:
+**Solution:** 
+1. First, calculate your actual page size (see "Calculating Page Size" section above)
+2. Set `max_page_size` to a value larger than your page size (add 10-20% buffer):
+
 ```bash
-uci set opennds.@opennds[0].max_page_size='20480'
+# Example: if your page is 25KB, set to 30KB (30720 bytes)
+uci set opennds.@opennds[0].max_page_size='30720'
 uci commit opennds
 /etc/init.d/opennds restart
+```
+
+**Quick one-liner:**
+```bash
+uci set opennds.@opennds[0].max_page_size='30720' && uci commit opennds && /etc/init.d/opennds restart
 ```
 
 ### Page shows default OpenNDS splash instead of custom theme
@@ -354,13 +445,13 @@ uci show opennds | grep -E 'login|theme'
 Should show:
 ```
 opennds.@opennds[0].login_option_enabled='3'
-opennds.@opennds[0].themespec_path='/usr/lib/opennds/kdzu-theme.sh'
+opennds.@opennds[0].themespec_path='/usr/lib/opennds/big-white-dog-theme.sh'
 ```
 
 **Fix:**
 ```bash
 uci set opennds.@opennds[0].login_option_enabled='3'
-uci set opennds.@opennds[0].themespec_path='/usr/lib/opennds/kdzu-theme.sh'
+uci set opennds.@opennds[0].themespec_path='/usr/lib/opennds/big-white-dog-theme.sh'
 uci commit opennds
 /etc/init.d/opennds restart
 ```
@@ -372,7 +463,7 @@ uci commit opennds
 **Test the script:**
 ```bash
 ssh root@192.168.1.1
-sh -n /usr/lib/opennds/kdzu-theme.sh
+sh -n /usr/lib/opennds/big-white-dog-theme.sh
 ```
 
 If there are errors, they'll be displayed. Common issues:
@@ -386,7 +477,7 @@ If there are errors, they'll be displayed. Common issues:
 
 **Solution:**
 ```bash
-ssh root@192.168.1.1 "chmod +x /usr/lib/opennds/kdzu-theme.sh"
+ssh root@192.168.1.1 "chmod +x /usr/lib/opennds/big-white-dog-theme.sh"
 ```
 
 ### Authentication doesn't work (stuck in loop)
@@ -419,7 +510,7 @@ Key UCI options used in this project:
 | Option | Value | Purpose |
 |--------|-------|---------|
 | `login_option_enabled` | `3` | Use custom ThemeSpec script |
-| `themespec_path` | `/usr/lib/opennds/kdzu-theme.sh` | Path to custom theme |
+| `themespec_path` | `/usr/lib/opennds/big-white-dog-theme.sh` | Path to custom theme |
 | `max_page_size` | `20480` | Maximum HTML page size (bytes) |
 | `fas_secure_enabled` | `0` | Security level (0=basic, 1-4=secure) |
 
@@ -466,7 +557,7 @@ When creating OpenNDS themes:
 /etc/config/opennds        # UCI configuration file
 
 /usr/lib/opennds/          # OpenNDS libraries and themes
-  ├── kdzu-theme.sh        # Your custom theme
+  ├── big-white-dog-theme.sh  # Your custom theme
   ├── libopennds.sh        # Core library
   └── theme_*.sh           # Built-in themes
 
@@ -504,11 +595,10 @@ ndsctl deauth <client-ip>
 ## Project Structure
 
 ```
-fas/
-├── kdzu-theme.sh          # Main theme script (deploy this)
-├── index.html             # Reference HTML (for editing)
-├── splash.html            # Legacy static HTML (deprecated)
-└── README.md              # This file
+all-is-not-lost/
+├── big-white-dog-theme.sh          # Main theme script (deploy this)
+├── big-white-dog-theme-preview.html # Preview HTML (for editing)
+└── README.md                        # This file
 ```
 
 ## Design Philosophy
