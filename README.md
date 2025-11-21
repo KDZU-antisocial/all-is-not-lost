@@ -12,6 +12,7 @@ A custom captive portal splash page for OpenWrt routers running OpenNDS. This pr
 - [Understanding the Components](#understanding-the-components)
 - [Customization](#customization)
 - [Troubleshooting](#troubleshooting)
+- [Offline Networks and Captive Portal Detection](#offline-networks-and-captive-portal-detection)
 - [Technical Details](#technical-details)
 
 ---
@@ -501,6 +502,304 @@ ssh root@192.168.1.1 "chmod +x /usr/lib/opennds/big-white-dog-theme.sh"
 
 ---
 
+## Offline Networks and Captive Portal Detection
+
+### The Problem
+
+When using OpenNDS on a network **without internet access** (a true "lone wolf" network), modern smartphones may not automatically show the captive portal page. This happens because phones use **Captive Portal Detection (CPD)** mechanisms that check specific internet endpoints to determine if a portal is present.
+
+**What phones check:**
+- **iOS**: `captive.apple.com`, `www.apple.com/library/test/success.html`
+- **Android**: `connectivitycheck.gstatic.com/generate_204`, `clients3.google.com/generate_204`
+- **Windows**: `www.msftconnecttest.com/connecttest.txt`
+
+Without internet, these requests fail, and the phone may show "No Internet Connection" instead of opening the portal.
+
+### Solution: DNS-Based Captive Portal Detection
+
+The most reliable workaround is to configure your router to intercept CPD DNS queries and respond locally, making phones think there's a captive portal present.
+
+#### Step 1: Configure DNS Interception with dnsmasq
+
+OpenWrt uses `dnsmasq` for DNS and DHCP. Configure it to redirect CPD domains to your router's IP address.
+
+SSH into your router:
+
+```bash
+ssh root@192.168.1.1
+```
+
+Add DNS entries for captive portal detection domains. Edit `/etc/config/dhcp`:
+
+```bash
+uci add_list dhcp.@dnsmasq[0].address='/captive.apple.com/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/www.apple.com/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/connectivitycheck.gstatic.com/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/clients3.google.com/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/www.msftconnecttest.com/192.168.1.1'
+# Also intercept CNAME chain targets that phones follow
+uci add_list dhcp.@dnsmasq[0].address='/captive.g.aaplimg.com/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/captive-cidr.origin-apple.com.akadns.net/192.168.1.1'
+uci add_list dhcp.@dnsmasq[0].address='/captive-geo.origin-apple.com.akadns.net/192.168.1.1'
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+```
+
+**Note:** Replace `192.168.1.1` with your router's actual IP address.
+
+**Important:** Modern iOS devices also make HTTPS (SVCB) queries for captive portal detection. The DNS interception above handles A records, but you also need to ensure OpenNDS intercepts HTTP/HTTPS traffic to these domains. OpenNDS should automatically intercept all HTTP traffic, but verify it's configured correctly (see troubleshooting section below).
+
+**Troubleshooting the configuration:**
+
+If you see `udhcpc` errors (like "no lease, failing"), this is usually unrelated—it's the router's DHCP client on another interface. The dnsmasq configuration should still work.
+
+**Verify the configuration was applied:**
+
+```bash
+# Check that the DNS entries were added
+uci show dhcp.@dnsmasq[0] | grep address
+
+# Should show lines like:
+# dhcp.@dnsmasq[0].address='/captive.apple.com/192.168.1.1'
+```
+
+**If the entries aren't showing up, try an alternative method:**
+
+Edit `/etc/config/dhcp` directly:
+
+```bash
+vi /etc/config/dhcp
+```
+
+Add these lines inside the `config dnsmasq` section:
+
+```
+        list address '/captive.apple.com/192.168.1.1'
+        list address '/www.apple.com/192.168.1.1'
+        list address '/connectivitycheck.gstatic.com/192.168.1.1'
+        list address '/clients3.google.com/192.168.1.1'
+        list address '/www.msftconnecttest.com/192.168.1.1'
+```
+
+Then:
+
+```bash
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+```
+
+**Check dnsmasq is running:**
+
+```bash
+/etc/init.d/dnsmasq status
+# Should show "running"
+
+# Or check the process
+ps | grep dnsmasq
+```
+
+#### Step 2: Set Up Local HTTP Responses (Optional but Recommended)
+
+For best results, configure a local web server to respond to CPD requests. OpenWrt includes `uhttpd` by default.
+
+Create a simple response page for CPD endpoints. Create `/www/captive.html`:
+
+```bash
+cat > /www/captive.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content="0;url=http://192.168.1.1:2050/">
+</head>
+<body>
+Redirecting to portal...
+</body>
+</html>
+EOF
+```
+
+**Note:** Replace `192.168.1.1:2050` with your OpenNDS gateway URL.
+
+Configure `uhttpd` to serve this file for CPD paths. Edit `/etc/config/uhttpd` or create redirect rules.
+
+Alternatively, you can configure OpenNDS to handle these requests directly by ensuring it intercepts all HTTP traffic on port 80.
+
+#### Step 3: Verify DNS Configuration
+
+Test that DNS interception is working:
+
+```bash
+# From a connected device, test DNS resolution
+nslookup captive.apple.com
+
+# Should return your router's IP (192.168.1.1) instead of Apple's servers
+```
+
+#### Step 4: Test Captive Portal Detection
+
+1. Disconnect and reconnect to your WiFi network
+2. On iOS: The phone should automatically open the portal
+3. On Android: You may need to open a browser and try to visit any website
+4. The portal should appear automatically
+
+#### Step 5: Verify It's Working (Optional)
+
+**Enable query logging to see DNS interception in action:**
+
+```bash
+# Enable query logging in dnsmasq
+uci set dhcp.@dnsmasq[0].logqueries='1'
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+
+# Monitor queries in real time
+logread -f | grep dnsmasq
+```
+
+**What success looks like in the logs:**
+
+When a phone connects, you should see:
+```
+dnsmasq[1]: query[A] captive.apple.com from 192.168.1.XXX
+dnsmasq[1]: config captive.apple.com is 192.168.1.1
+dnsmasq[1]: query[A] captive.g.aaplimg.com from 192.168.1.XXX
+dnsmasq[1]: config captive.g.aaplimg.com is 192.168.1.1
+```
+
+The key indicator is `config ... is 192.168.1.1` - this means dnsmasq is intercepting the query and returning your router's IP.
+
+**Check OpenNDS client status:**
+
+```bash
+ndsctl clients
+```
+
+You should see connected clients with state "Preauthenticated" or "Authenticated". Client type "cpd_can" indicates the phone detected a captive portal.
+
+**Quick verification checklist:**
+
+- [ ] DNS entries show in `uci show dhcp.@dnsmasq[0] | grep address`
+- [ ] `nslookup captive.apple.com` returns your router's IP
+- [ ] `ndsctl status` shows OpenNDS is running
+- [ ] Phone automatically shows portal when connecting (iOS) or browsing (Android)
+- [ ] `ndsctl clients` shows connected devices
+
+#### Removing DNS Interception (If Needed)
+
+If you want to remove the DNS interception entries later:
+
+```bash
+# List current entries
+uci show dhcp.@dnsmasq[0] | grep address
+
+# Remove specific entries (replace with actual entry)
+uci del_list dhcp.@dnsmasq[0].address='/captive.apple.com/192.168.1.1'
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+```
+
+Or edit `/etc/config/dhcp` directly and remove the `list address` lines, then commit and restart.
+
+### Alternative: Manual Navigation
+
+If DNS interception isn't working, users can manually navigate to the gateway URL:
+
+- **Gateway URL**: `http://192.168.1.1:2050` (replace with your router's IP)
+- **Or try**: `http://192.168.1.1` (if OpenNDS is on port 80)
+
+You can add instructions to your SSID or create a simple info page that users see when they connect.
+
+### Troubleshooting Offline Portal Detection
+
+**Problem:** Phone still shows "No Internet Connection" instead of portal
+
+**Solutions:**
+1. **Check DNS configuration:**
+   ```bash
+   uci show dhcp.@dnsmasq[0] | grep address
+   ```
+   Should show entries for captive portal domains.
+
+2. **Verify dnsmasq is running:**
+   ```bash
+   /etc/init.d/dnsmasq status
+   ```
+
+3. **Check OpenNDS is intercepting traffic:**
+   ```bash
+   ndsctl status
+   ```
+   Ensure OpenNDS is running and listening on the correct interface.
+
+4. **Test DNS resolution from a connected device:**
+   ```bash
+   # From a laptop connected to the network
+   nslookup captive.apple.com
+   # Should return your router's IP, not Apple's
+   ```
+
+5. **Phone follows CNAME chain and gets real IPs:**
+   
+   If you see in dnsmasq logs that the phone is querying `captive.g.aaplimg.com` or other CNAME targets and getting real IPs, add those domains to DNS interception:
+   
+   ```bash
+   uci add_list dhcp.@dnsmasq[0].address='/captive.g.aaplimg.com/192.168.1.1'
+   uci add_list dhcp.@dnsmasq[0].address='/captive-cidr.origin-apple.com.akadns.net/192.168.1.1'
+   uci add_list dhcp.@dnsmasq[0].address='/captive-geo.origin-apple.com.akadns.net/192.168.1.1'
+   uci commit dhcp
+   /etc/init.d/dnsmasq restart
+   ```
+   
+   Also ensure OpenNDS is intercepting HTTP traffic. Check OpenNDS status:
+   ```bash
+   ndsctl status
+   ```
+   Should show OpenNDS is running. Also check that OpenNDS is configured to intercept traffic:
+   ```bash
+   # Check OpenNDS configuration
+   uci show opennds | grep -E 'gateway|interface'
+   
+   # On newer OpenWrt with nftables, check firewall rules:
+   nft list ruleset | grep -i opennds
+   
+   # Or check if OpenNDS is listening on the correct port:
+   netstat -tlnp | grep 2050
+   # or
+   ss -tlnp | grep 2050
+   ```
+   OpenNDS should be listening on port 2050 (or the port configured in your setup).
+
+6. **Force portal detection on Android:**
+   - Go to WiFi settings
+   - Long-press your network name
+   - Select "Modify network" or "Network details"
+   - Some Android versions have a "Sign in" or "Portal" button
+
+7. **Force portal detection on iOS:**
+   - Open Safari
+   - Try visiting any website (e.g., `http://example.com`)
+   - iOS should detect the portal and redirect
+
+### Additional Considerations
+
+- **Firewall Rules**: Ensure your firewall allows HTTP traffic to reach OpenNDS on the correct port (usually 2050 or 80)
+- **Network Isolation**: Make sure clients can reach the router's IP even without internet
+- **SSID Naming**: Some phones are more likely to show portals for SSIDs containing "Free", "Public", or "WiFi", though this is unreliable
+- **Multiple Interfaces**: If your router has multiple network interfaces, ensure OpenNDS is configured for the correct one
+
+### For True "Lone Wolf" Networks
+
+If you're running a completely offline network (no internet gateway at all):
+
+1. **Disable gateway detection** in OpenNDS if possible
+2. **Configure static routes** so clients can reach the router
+3. **Use DNS interception** (as described above) to trigger portal detection
+4. **Consider adding a simple info page** at the router's IP that explains how to access the portal
+
+The DNS interception method is the most reliable way to make modern phones detect your captive portal on offline networks.
+
+---
+
 ## Technical Details
 
 ### OpenNDS Configuration Options
@@ -601,22 +900,9 @@ all-is-not-lost/
 └── README.md                        # This file
 ```
 
-## Design Philosophy
-
-This captive portal embodies the KDZU project's concept of **tactical mythmaking**:
-
-- **Ontological Camouflage** - The captive portal appears as a familiar WiFi login page but delivers unexpected narrative content
-- **Brechtian Alienation** - The design deliberately reveals its constructed nature (glitch effects, visible artifacts)
-- **Tactical Intervention** - The moment of connecting to WiFi becomes a moment of narrative engagement
-- **Human-Scale Distribution** - Like zines photocopied and distributed by hand, these WiFi routers broadcast at human scale, accessible only to those within physical proximity
-
-The finder/participant is implicated simply by connecting to the network - the WiFi connection itself becomes a tactical artifact.
-
 ### Lone Wolf as Medium
 
-The router becomes a transmitter of narrative fragments, broadcasting from transitional spaces—edges of trails, rooftops, stairwells. It may run on batteries. It may be found behind a vending machine. It may disappear tomorrow. The ephemeral nature of the network mirrors the project's themes of memory, silence, and artifacts.
-
-This is not a server in a data center. This is not cloud infrastructure. This is a router in a backpack, a transmitter on a rooftop, a signal in the stairwell—human-made content at human scale.
+The router becomes a transmitter of narrative fragments, broadcasting from transitional spaces—edges of trails, rooftops, stairwells. It may run on batteries. It may be found behind a vending machine. This is a router in a backpack, a transmitter on a rooftop, a signal in the stairwell—human-made content at human scale. It may disappear tomorrow.
 
 ---
 
@@ -672,4 +958,4 @@ For issues specific to:
 
 ---
 
-*"All Is Not Lost" - KDZU Radio Network*
+*"All Is Not Lost" - KDZU "Lone Wolf" WiFi*
