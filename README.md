@@ -125,13 +125,15 @@ Once connected, run these commands:
 ```bash
 # Make the theme script executable, commit config, and restart OpenNDS
 chmod +x /usr/lib/opennds/big-white-dog-theme.sh && uci commit opennds && /etc/init.d/opennds restart
+
+chmod +x /usr/lib/opennds/except-to-the-sun.sh && uci commit opennds && /etc/init.d/opennds restart
 ```
 
 **Or run the configuration steps individually:**
 
 ```bash
 # Make the theme script executable
-chmod +x /usr/lib/opennds/big-white-dog-theme.sh
+chmod +x /usr/lib/opennds/except-to-the-sun.sh
 
 # Configure OpenNDS to use login mode 3 (custom ThemeSpec)
 uci set opennds.@opennds[0].login_option_enabled='3'
