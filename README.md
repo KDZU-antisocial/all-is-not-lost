@@ -105,7 +105,7 @@ You should have these files:
 Use SCP to copy the theme script to your router's OpenNDS directory:
 
 ```bash
-scp -O big-white-dog-theme.sh root@192.168.1.1:/usr/lib/opennds/
+scp -O except-to-the-sun.sh root@192.168.1.1:/usr/lib/opennds/
 ```
 
 **Note:** Replace `192.168.1.1` with your router's actual IP address.
@@ -124,9 +124,7 @@ Once connected, run these commands:
 
 ```bash
 # Make the theme script executable, commit config, and restart OpenNDS
-chmod +x /usr/lib/opennds/big-white-dog-theme.sh && uci commit opennds && /etc/init.d/opennds restart
-
-chmod +x /usr/lib/opennds/except-to-the-sun.sh && uci commit opennds && /etc/init.d/opennds restart
+chmod +x /usr/lib/opennds/except-to-the-sea.sh && uci commit opennds && /etc/init.d/opennds restart
 ```
 
 **Or run the configuration steps individually:**
