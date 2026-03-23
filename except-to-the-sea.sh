@@ -407,11 +407,11 @@ packrat_splash() {
 		<section>
 			<h2>OPERATIONAL DETAILS</h2>
 
-			<h3>The Trade</h3>
+			<h3>Ontological Camouflage</h3>
 			<p>
 				We are notorious for carrying off small, shiny, items: keys, coins, golf balls,
 				bottle caps. When we encounter something more compelling, we
-				<span class=\"highlight\">drop one object to take another</span>. Value is unprescribed. What they lose in the parking lot may reappear furniture in our midden.
+				<span class=\"highlight\">drop one object to take another</span>. Object value is temporary and unprescribed. What they lose in the parking lot may reappear as furniture in our midden.
 			</p>
 
 			<ul class=\"key-list\">
